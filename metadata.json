@@ -1,0 +1,8 @@
+{
+  "name": "ARTOO Assistant",
+  "description": "A high-performance virtual assistant for engineers with real-time voice and video analysis capabilities.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
