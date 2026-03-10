@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Mic, Video, VideoOff, Power, Activity, Terminal, Cpu, Key, Save, Trash2 } from 'lucide-react';
-import { ArtooLiveService } from '../services/artooService';
 import { ArtooGroqService } from '../services/groqService';
 import { R2D2 } from './R2D2';
 import { motion, AnimatePresence } from 'motion/react';
@@ -13,12 +12,25 @@ export const ArtooAssistant: React.FC = () => {
   const [lastResponse, setLastResponse] = useState('');
   const [apiKey, setApiKey] = useState(localStorage.getItem('ARTOO_API_KEY') || '');
   const [showKeyEntry, setShowKeyEntry] = useState(!localStorage.getItem('ARTOO_API_KEY'));
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const isActiveRef = useRef(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const groqService = useRef<ArtooGroqService | null>(null);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
+
+  // Attach camera stream when video element is ready
+  useEffect(() => {
+    if (isCameraOn && cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+    }
+  }, [isCameraOn, cameraStream]);
+
+  useEffect(() => {
+    isActiveRef.current = isActive;
+  }, [isActive]);
 
   const speak = (text: string) => {
     window.speechSynthesis.cancel();
@@ -46,9 +58,12 @@ export const ArtooAssistant: React.FC = () => {
   useEffect(() => {
     return () => {
       stopAudio();
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
       window.speechSynthesis.cancel();
     };
-  }, []);
+  }, [cameraStream]);
 
   const startAudio = async () => {
     try {
@@ -61,12 +76,13 @@ export const ArtooAssistant: React.FC = () => {
       };
 
       mediaRecorder.current.onstop = async () => {
-        const audioBlob = new Blob(audioChunks.current, { type: 'audio/m4a' });
+        const mimeType = mediaRecorder.current?.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunks.current, { type: mimeType });
         if (audioBlob.size < 1000) return; // Too short
 
         setIsGenerating(true);
         try {
-          const text = await groqService.current?.transcribe(audioBlob);
+          const text = await groqService.current?.transcribe(audioBlob, mimeType);
           if (text) {
             let imageBase64 = undefined;
             if (isCameraOn && videoRef.current && canvasRef.current) {
@@ -89,20 +105,24 @@ export const ArtooAssistant: React.FC = () => {
         setIsGenerating(false);
         
         // Restart recording if still active
-        if (isActive) {
+        if (isActiveRef.current) {
           audioChunks.current = [];
-          mediaRecorder.current?.start();
-          setTimeout(() => {
-            if (mediaRecorder.current?.state === 'recording') {
-              mediaRecorder.current.stop();
-            }
-          }, 4000); // 4 second chunks
+          try {
+            mediaRecorder.current?.start();
+            setTimeout(() => {
+              if (mediaRecorder.current?.state === 'recording' && isActiveRef.current) {
+                mediaRecorder.current.stop();
+              }
+            }, 4000); // 4 second chunks
+          } catch (e) {
+            console.error("Restart error:", e);
+          }
         }
       };
 
       mediaRecorder.current.start();
       setTimeout(() => {
-        if (mediaRecorder.current?.state === 'recording') {
+        if (mediaRecorder.current?.state === 'recording' && isActiveRef.current) {
           mediaRecorder.current.stop();
         }
       }, 4000);
@@ -146,8 +166,8 @@ export const ArtooAssistant: React.FC = () => {
 
   const toggleCamera = async () => {
     if (isCameraOn) {
-      const stream = videoRef.current?.srcObject as MediaStream;
-      stream?.getTracks().forEach(track => track.stop());
+      cameraStream?.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
       setIsCameraOn(false);
     } else {
       try {
@@ -157,25 +177,20 @@ export const ArtooAssistant: React.FC = () => {
 
         let stream: MediaStream;
         try {
-          // Try environment camera first
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         } catch (e) {
           try {
-            // Fallback to user camera
             stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
           } catch (e2) {
-            // Final fallback to any video device
             stream = await navigator.mediaDevices.getUserMedia({ video: true });
           }
         }
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          setIsCameraOn(true);
-        }
+        setCameraStream(stream);
+        setIsCameraOn(true);
       } catch (err) {
         console.error("Camera error:", err);
-        setLastResponse(`> ERROR: CAMERA DEVICE NOT FOUND OR PERMISSION DENIED.`);
+        setLastResponse(`> HATA: KAMERA CİHAZI BULUNAMADI VEYA İZİN VERİLMEDİ.`);
       }
     }
   };
@@ -300,6 +315,7 @@ export const ArtooAssistant: React.FC = () => {
                 ref={videoRef}
                 autoPlay
                 playsInline
+                muted
                 className="w-full h-full object-cover brightness-90 contrast-110"
               />
             ) : (
