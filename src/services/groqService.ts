@@ -7,8 +7,9 @@ export class ArtooGroqService {
     this.client = new Groq({ apiKey, dangerouslyAllowBrowser: true });
   }
 
-  async transcribe(audioBlob: Blob): Promise<string> {
-    const file = new File([audioBlob], "recording.m4a", { type: "audio/m4a" });
+  async transcribe(audioBlob: Blob, mimeType: string): Promise<string> {
+    const extension = mimeType.includes('webm') ? 'webm' : 'm4a';
+    const file = new File([audioBlob], `recording.${extension}`, { type: mimeType });
     const transcription = await this.client.audio.transcriptions.create({
       file: file,
       model: "whisper-large-v3",
